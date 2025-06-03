@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modern Crypto Comparison Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      background: #121212;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+    }
+    h2 {
+      text-align: center;
+      font-weight: 700;
+      color: #00ffc3;
+    }
+    .controls {
+      grid-auto-flow: row;
+      padding-bottom: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 15px;
+      align-items: end;
+      max-width: 1000px;
+      margin: 0 auto 20px;
+    }
+    label {
+      font-weight: 500;
+      margin-bottom: 5px;
+      display: block;
+    }
+    select, button {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      background-color: #2c2c2c;
+      color: #fff;
+    }
+    input[type="date"] {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #00ffc3;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    select, button, input[type="date"] {
+  box-sizing: border-box;
+    }    
+    canvas {
+      background: #1e1e1e;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 255, 195, 0.2);
+      margin: 0 auto;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Crypto Comparison Chart</h2>
+<div class="controls">
+  <div>
+    <label for="crypto1">Crypto 1:</label>
+    <select id="crypto1"></select>
+  </div>
+
+  <div>
+    <label for="crypto2">Crypto 2:</label>
+    <select id="crypto2"></select>
+  </div>
+
+  <div>
+    <label for="start">Start:</label>
+    <input type="date" id="start" value="2025-01-01">
+  </div>
+
+  <div>
+    <label for="end">End:</label>
+    <input type="date" id="end" value="2025-05-17">
+  </div>
+
+  <div style="padding-top: 10px; min-width: 160px;">
+    <button onclick="renderChart()">Compare</button>
+  </div>
+</div>
+
+<canvas id="comparisonChart" width="900" height="450"></canvas>
+
+<script>
+async function fetchTopCoins() {
+  const res = await fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1");
+  const coins = await res.json();
+
+  const crypto1 = document.getElementById("crypto1");
+  const crypto2 = document.getElementById("crypto2");
+
+  coins.forEach(coin => {
+    const option1 = new Option(`${coin.name} (${coin.symbol.toUpperCase()})`, coin.id);
+    const option2 = new Option(`${coin.name} (${coin.symbol.toUpperCase()})`, coin.id);
+    crypto1.add(option1);
+    crypto2.add(option2);
+  });
+
+  crypto1.value = "bitcoin";
+  crypto2.value = "ethereum";
+}
+
+async function fetchCryptoPrices(coinId, startDate, endDate) {
+  const fromTs = Math.floor(new Date(startDate).getTime() / 1000);
+  const toTs = Math.floor(new Date(endDate).getTime() / 1000);
+  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart/range?vs_currency=usd&from=${fromTs}&to=${toTs}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${coinId} data`);
+  const data = await res.json();
+
+  const unique = {};
+  data.prices.forEach(([timestamp, price]) => {
+    const date = new Date(timestamp).toISOString().split('T')[0];
+    if (!unique[date]) unique[date] = price;
+  });
+
+  return Object.entries(unique).map(([date, price]) => ({ date, price }));
+}
+
+function normalize(data) {
+  const base = data[0].price;
+  return data.map(d => ({
+    date: d.date,
+    price: ((d.price / base) * 100).toFixed(2),
+    pctChange: (((d.price - base) / base) * 100).toFixed(2)
+  }));
+}
+
+async function renderChart() {
+  const coin1 = document.getElementById("crypto1").value;
+  const coin2 = document.getElementById("crypto2").value;
+  const startDate = document.getElementById("start").value;
+  const endDate = document.getElementById("end").value;
+
+  if (coin1 === coin2) return alert("Please select two different cryptocurrencies.");
+
+  try {
+    const [data1, data2] = await Promise.all([
+      fetchCryptoPrices(coin1, startDate, endDate),
+      fetchCryptoPrices(coin2, startDate, endDate)
+    ]);
+
+    const norm1 = normalize(data1);
+    const norm2 = normalize(data2);
+    const labels = norm1.map(d => d.date);
+
+    const ctx = document.getElementById("comparisonChart").getContext("2d");
+    if (window.myChart) window.myChart.destroy();
+
+    window.myChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: document.getElementById("crypto1").selectedOptions[0].text,
+            data: norm1.map(d => d.price),
+            borderColor: "#00ffc3",
+            fill: false,
+            tension: 0.3
+          },
+          {
+            label: document.getElementById("crypto2").selectedOptions[0].text,
+            data: norm2.map(d => d.price),
+            borderColor: "#ff8c00",
+            fill: false,
+            tension: 0.3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: {
+            mode: "index",
+            intersect: false,
+            callbacks: {
+              label: function (context) {
+                const pctChange = context.datasetIndex === 0
+                  ? norm1[context.dataIndex].pctChange
+                  : norm2[context.dataIndex].pctChange;
+                return `${context.dataset.label}: ${context.formattedValue}% (Change: ${pctChange}%)`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            title: { display: true, text: "Normalized Price (%)" }
+          },
+          x: {
+            title: { display: true, text: "Date" }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+fetchTopCoins();
+</script>
+</body>
+</html>
